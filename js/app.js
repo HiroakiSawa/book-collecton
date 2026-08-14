@@ -1,5 +1,5 @@
 import * as db from "./db.js";
-import { lookupIsbn, normalizeIsbn } from "./api.js";
+import { lookupIsbn, normalizeIsbn, searchByKeyword } from "./api.js";
 import { startScanner, stopScanner, isCameraSupported } from "./scanner.js";
 import { toCSV, toJSON, fromCSV, fromJSON, downloadTextFile } from "./csv.js";
 import { initHardwareScanner } from "./hardwareScanner.js";
@@ -45,6 +45,7 @@ const els = {
   fIsbn: $("f-isbn"),
   fIsbnLookup: $("f-isbn-lookup"),
   fDuplicateWarning: $("f-duplicate-warning"),
+  fKeywordSearch: $("f-keyword-search"),
   fTitle: $("f-title"),
   fAuthor: $("f-author"),
   fPublisher: $("f-publisher"),
@@ -56,6 +57,12 @@ const els = {
   isbnSearchInput: $("isbn-search-input"),
   isbnSearchBtn: $("isbn-search-btn"),
   isbnSearchStatus: $("isbn-search-status"),
+
+  keywordModal: $("keyword-modal"),
+  keywordInput: $("keyword-input"),
+  keywordSearchBtn: $("keyword-search-btn"),
+  keywordStatus: $("keyword-status"),
+  keywordResults: $("keyword-results"),
 
   detailModal: $("detail-modal"),
   dCover: $("d-cover"),
@@ -113,6 +120,9 @@ function formatDate(iso) {
     return d.toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
   } catch { return iso; }
 }
+
+const SOURCE_LABELS = { openBD: "openBD", GoogleBooks: "Google Books", OpenLibrary: "Open Library" };
+function sourceLabel(source) { return SOURCE_LABELS[source] || source || "不明"; }
 
 // ---------- データ読み込み・描画 ----------
 async function loadBooks() {
@@ -264,7 +274,7 @@ async function handleIsbnCaptured(isbn) {
   const result = await lookupIsbn(isbn);
   if (result.found) {
     openBookForm({ isbn, ...result.data });
-    showToast(`書誌情報を取得しました（${result.data.source === "openBD" ? "openBD" : "Google Books"}）。内容を確認して保存してください。`);
+    showToast(`書誌情報を取得しました（${sourceLabel(result.data.source)}）。内容を確認して保存してください。`);
   } else {
     openBookForm({ isbn });
     showToast(result.error || "書誌情報が見つかりませんでした。手入力してください。", true);
@@ -301,7 +311,7 @@ els.isbnSearchBtn.addEventListener("click", async () => {
   closeModal(els.isbnSearchModal);
   if (result.found) {
     openBookForm({ isbn, ...result.data });
-    showToast(`書誌情報を取得しました（${result.data.source === "openBD" ? "openBD" : "Google Books"}）。内容を確認して保存してください。`);
+    showToast(`書誌情報を取得しました（${sourceLabel(result.data.source)}）。内容を確認して保存してください。`);
   } else {
     openBookForm({ isbn });
     showToast(result.error || "書誌情報が見つかりませんでした。手入力してください。", true);
@@ -410,12 +420,81 @@ els.fIsbnLookup.addEventListener("click", async () => {
     if (data.publisher) els.fPublisher.value = data.publisher;
     if (data.pubdate) els.fPubdate.value = data.pubdate;
     if (data.coverUrl) { els.fCoverUrl.value = data.coverUrl; setCoverPreview(data.coverUrl); }
-    els.fStatus.textContent = `取得しました（${data.source === "openBD" ? "openBD" : "Google Books"}）。`;
+    els.fStatus.textContent = `取得しました（${sourceLabel(data.source)}）。`;
   } else {
     els.fStatus.textContent = result.error || "見つかりませんでした。手入力してください。";
   }
   checkDuplicateIsbn();
 });
+
+// ---------- 書名・著者キーワード検索（ISBNで見つからない洋書などの代替手段） ----------
+let keywordResultsCache = [];
+
+els.fKeywordSearch.addEventListener("click", () => {
+  els.keywordInput.value = els.fTitle.value.trim();
+  els.keywordStatus.textContent = "";
+  els.keywordResults.innerHTML = "";
+  keywordResultsCache = [];
+  openModal(els.keywordModal);
+  setTimeout(() => els.keywordInput.focus(), 50);
+});
+
+els.keywordInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); els.keywordSearchBtn.click(); }
+});
+
+els.keywordSearchBtn.addEventListener("click", async () => {
+  const query = els.keywordInput.value.trim();
+  if (!query) { els.keywordStatus.textContent = "検索キーワードを入力してください。"; return; }
+
+  els.keywordStatus.textContent = "検索中...";
+  els.keywordResults.innerHTML = "";
+  let results = [];
+  try {
+    results = await searchByKeyword(query);
+  } catch {
+    els.keywordStatus.textContent = "検索に失敗しました（通信エラー）。もう一度お試しください。";
+    return;
+  }
+  keywordResultsCache = results;
+
+  if (results.length === 0) {
+    els.keywordStatus.textContent = "候補が見つかりませんでした。キーワードを変えてお試しください。";
+    return;
+  }
+  els.keywordStatus.textContent = `${results.length} 件見つかりました。選択してください。`;
+  els.keywordResults.innerHTML = results.map((r, i) => `
+    <li>
+      <button type="button" class="keyword-result" data-index="${i}">
+        ${r.coverUrl
+          ? `<img class="keyword-result-cover" src="${escapeAttr(r.coverUrl)}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'keyword-result-cover-placeholder',textContent:'📕'}))">`
+          : `<div class="keyword-result-cover-placeholder">📕</div>`}
+        <div class="keyword-result-info">
+          <p class="keyword-result-title">${escapeHtml(r.title)}</p>
+          <p class="keyword-result-meta">${escapeHtml(r.author || "著者不明")}</p>
+          <p class="keyword-result-meta">${escapeHtml([r.publisher, r.pubdate].filter(Boolean).join(" / ") || sourceLabel(r.source))}</p>
+        </div>
+      </button>
+    </li>
+  `).join("");
+
+  els.keywordResults.querySelectorAll(".keyword-result").forEach((btn) => {
+    btn.addEventListener("click", () => selectKeywordResult(keywordResultsCache[Number(btn.dataset.index)]));
+  });
+});
+
+function selectKeywordResult(candidate) {
+  if (!candidate) return;
+  if (candidate.title) els.fTitle.value = candidate.title;
+  if (candidate.author) els.fAuthor.value = candidate.author;
+  if (candidate.publisher) els.fPublisher.value = candidate.publisher;
+  if (candidate.pubdate) els.fPubdate.value = candidate.pubdate;
+  if (candidate.isbn) els.fIsbn.value = candidate.isbn;
+  if (candidate.coverUrl) { els.fCoverUrl.value = candidate.coverUrl; setCoverPreview(candidate.coverUrl); }
+  els.fStatus.textContent = `候補を反映しました（${sourceLabel(candidate.source)}）。内容を確認して保存してください。`;
+  closeModal(els.keywordModal);
+  checkDuplicateIsbn();
+}
 
 els.bookForm.addEventListener("submit", async (e) => {
   e.preventDefault();
