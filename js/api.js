@@ -4,27 +4,6 @@ export function normalizeIsbn(raw) {
   return String(raw || "").replace(/[^0-9Xx]/g, "").toUpperCase();
 }
 
-/**
- * QRコードなど、ISBN単体とは限らないテキスト（URLなどを含む）からISBNらしき文字列を抽出する。
- * バーコード（EAN-13）はデコード結果がそのまま数字列になるが、QRコードは
- * 「https://example.com/isbn/978...」のようにISBNの前後に別の文字列が付くことがあるため、
- * テキスト中から数字・ハイフン主体のまとまりを探し、ISBN-13/ISBN-10として妥当なものを返す。
- * @param {string} text
- * @returns {string|null} 正規化済みのISBN、見つからなければ null
- */
-export function extractIsbnFromText(text) {
-  if (!text) return null;
-  const raw = String(text);
-  // 数字・ハイフン・スペース・Xで構成された、ある程度の長さのまとまりを候補として抽出する
-  const segments = raw.match(/[0-9][0-9Xx \-]{7,}[0-9Xx]/g) || [raw];
-  for (const segment of segments) {
-    const normalized = normalizeIsbn(segment);
-    if (normalized.length === 13 && /^97[89]/.test(normalized)) return normalized;
-    if (normalized.length === 10) return normalized;
-  }
-  return null;
-}
-
 async function fetchOpenBD(isbn) {
   const res = await fetch(`https://api.openbd.jp/v1/get?isbn=${encodeURIComponent(isbn)}`);
   if (!res.ok) throw new Error(`openBD HTTP ${res.status}`);
