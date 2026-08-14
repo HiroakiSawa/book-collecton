@@ -25,7 +25,8 @@
 
 <main>
   <div class="action-bar">
-    <button id="btn-scan" class="btn btn-primary">📷 スキャンして登録</button>
+    <button id="btn-scan-barcode" class="btn btn-primary">📷 バーコードでスキャン</button>
+    <button id="btn-scan-qr" class="btn btn-primary">🔲 QRコードでスキャン</button>
     <button id="btn-manual" class="btn">✏️ 手入力で登録</button>
     <button id="btn-isbn-search" class="btn">🔎 ISBNで検索</button>
     <div class="spacer"></div>
@@ -51,7 +52,7 @@
 <dialog id="scan-modal" class="modal">
   <div class="modal-content">
     <div class="modal-header">
-      <h2>バーコードをスキャン</h2>
+      <h2 id="scan-modal-title">バーコードをスキャン</h2>
       <button class="btn-close" data-close="scan-modal" aria-label="閉じる">✕</button>
     </div>
     <div id="scan-reader"></div>

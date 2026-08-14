@@ -1,5 +1,5 @@
 import * as db from "./db.js";
-import { lookupIsbn, normalizeIsbn } from "./api.js";
+import { lookupIsbn, normalizeIsbn, extractIsbnFromText } from "./api.js";
 import { startScanner, stopScanner, isCameraSupported } from "./scanner.js";
 import { toCSV, toJSON, fromCSV, fromJSON, downloadTextFile } from "./csv.js";
 import { initHardwareScanner } from "./hardwareScanner.js";
@@ -16,7 +16,8 @@ const $ = (id) => document.getElementById(id);
 const els = {
   searchInput: $("search-input"),
   sortSelect: $("sort-select"),
-  btnScan: $("btn-scan"),
+  btnScanBarcode: $("btn-scan-barcode"),
+  btnScanQr: $("btn-scan-qr"),
   btnManual: $("btn-manual"),
   btnIsbnSearch: $("btn-isbn-search"),
   btnExport: $("btn-export"),
@@ -28,6 +29,7 @@ const els = {
   bookGrid: $("book-grid"),
 
   scanModal: $("scan-modal"),
+  scanModalTitle: $("scan-modal-title"),
   scanStatus: $("scan-status"),
   scanUnsupported: $("scan-unsupported"),
 
@@ -182,11 +184,20 @@ function render() {
 els.searchInput.addEventListener("input", (e) => { searchTerm = e.target.value; render(); });
 els.sortSelect.addEventListener("change", (e) => { sortKey = e.target.value; render(); });
 
-// ---------- スキャン ----------
-els.btnScan.addEventListener("click", async () => {
+// ---------- スキャン（バーコード / QRコード） ----------
+const SCAN_PROMPTS = {
+  barcode: "本の裏表紙のISBNバーコードをカメラに向けてください。",
+  qr: "ISBNを含むQRコードをカメラに向けてください。",
+};
+
+els.btnScanBarcode.addEventListener("click", () => openScanModal("barcode"));
+els.btnScanQr.addEventListener("click", () => openScanModal("qr"));
+
+async function openScanModal(mode) {
+  els.scanModalTitle.textContent = mode === "qr" ? "QRコードをスキャン" : "バーコードをスキャン";
   els.scanStatus.hidden = false;
   els.scanUnsupported.hidden = true;
-  els.scanStatus.textContent = "本の裏表紙のISBNバーコードをカメラに向けてください。";
+  els.scanStatus.textContent = SCAN_PROMPTS[mode] || SCAN_PROMPTS.barcode;
   openModal(els.scanModal);
 
   if (!isCameraSupported()) {
@@ -195,19 +206,31 @@ els.btnScan.addEventListener("click", async () => {
     return;
   }
 
-  const ok = await startScanner("scan-reader", onBarcodeDetected, (errMsg) => {
+  const ok = await startScanner("scan-reader", mode, (text) => onCodeDetected(mode, text), (errMsg) => {
     els.scanUnsupported.hidden = false;
     els.scanUnsupported.textContent = `カメラを起動できませんでした：${errMsg}`;
     els.scanStatus.hidden = true;
   });
   if (!ok) return;
-});
+}
 
 let handlingDetection = false;
-async function onBarcodeDetected(text) {
+async function onCodeDetected(mode, text) {
   if (handlingDetection) return;
+
+  let isbn;
+  if (mode === "qr") {
+    isbn = extractIsbnFromText(text);
+    if (!isbn) {
+      // ISBNを含まないQRコード（無関係なURLなど）は無視し、スキャンを続行する
+      els.scanStatus.textContent = "QRコードを検出しましたが、ISBNが見つかりませんでした。ISBNを含むQRコードを読み取ってください。";
+      return;
+    }
+  } else {
+    isbn = normalizeIsbn(text);
+  }
+
   handlingDetection = true;
-  const isbn = normalizeIsbn(text);
   els.scanStatus.textContent = `検出しました: ${isbn}　書誌情報を検索中...`;
   await stopScanner();
   closeModal(els.scanModal);
