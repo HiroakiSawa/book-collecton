@@ -2,6 +2,7 @@ import * as db from "./db.js";
 import { lookupIsbn, normalizeIsbn } from "./api.js";
 import { startScanner, stopScanner, isCameraSupported } from "./scanner.js";
 import { toCSV, toJSON, fromCSV, fromJSON, downloadTextFile } from "./csv.js";
+import { initHardwareScanner } from "./hardwareScanner.js";
 
 // ---------- 状態 ----------
 let allBooks = [];
@@ -215,6 +216,25 @@ async function onBarcodeDetected(text) {
   handlingDetection = false;
 }
 
+// USB/Bluetoothバーコードリーダー（キーボードエミュレーション型）からの読み取り。
+// カメラの起動状態に関わらず、他のダイアログが開いていない/入力欄にフォーカスがない状態であれば
+// どの画面からでもそのままスキャンして登録フローに入れる。
+async function onHardwareScan(rawText) {
+  if (handlingDetection) return;
+  handlingDetection = true;
+  const isbn = normalizeIsbn(rawText);
+
+  if (els.scanModal.open) {
+    els.scanStatus.textContent = `検出しました: ${isbn}　書誌情報を検索中...`;
+    await stopScanner();
+  }
+  document.querySelectorAll("dialog[open]").forEach((dlg) => closeModal(dlg));
+
+  await handleIsbnCaptured(isbn);
+  handlingDetection = false;
+}
+initHardwareScanner(onHardwareScan);
+
 async function handleIsbnCaptured(isbn) {
   const existing = await db.findByIsbn(isbn);
   if (existing) {
@@ -240,6 +260,10 @@ els.btnIsbnSearch.addEventListener("click", () => {
   els.isbnSearchStatus.textContent = "";
   openModal(els.isbnSearchModal);
   setTimeout(() => els.isbnSearchInput.focus(), 50);
+});
+
+els.isbnSearchInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); els.isbnSearchBtn.click(); }
 });
 
 els.isbnSearchBtn.addEventListener("click", async () => {
@@ -352,6 +376,10 @@ async function checkDuplicateIsbn() {
 }
 els.fIsbn.addEventListener("blur", checkDuplicateIsbn);
 els.fIsbn.addEventListener("input", () => { els.fDuplicateWarning.hidden = true; });
+// バーコードリーダーがこの欄にフォーカスした状態で直接読み取らせた場合、末尾のEnterで検索を実行する
+els.fIsbn.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); els.fIsbnLookup.click(); }
+});
 
 els.fIsbnLookup.addEventListener("click", async () => {
   const isbn = normalizeIsbn(els.fIsbn.value);
