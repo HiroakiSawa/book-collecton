@@ -88,6 +88,8 @@
       </div>
       <p id="f-duplicate-warning" class="duplicate-warning" hidden>⚠️ この ISBN は既に登録されています。</p>
 
+      <button type="button" id="f-keyword-search" class="btn btn-small">🔎 書名・著者で候補を探す（洋書・ISBN不明な本にも）</button>
+
       <label class="field-label" for="f-title">書名 <span class="required">必須</span></label>
       <input type="text" id="f-title" required>
 
@@ -124,6 +126,22 @@
       <button type="button" id="isbn-search-btn" class="btn btn-primary">検索</button>
     </div>
     <p id="isbn-search-status" class="form-status" role="status"></p>
+  </div>
+</dialog>
+
+<!-- 書名・著者キーワード検索モーダル（ISBNで見つからない洋書などの代替手段） -->
+<dialog id="keyword-modal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>書名・著者で候補を探す</h2>
+      <button class="btn-close" data-close="keyword-modal" aria-label="閉じる">✕</button>
+    </div>
+    <div class="isbn-row">
+      <input type="text" id="keyword-input" placeholder="書名・著者などのキーワード">
+      <button type="button" id="keyword-search-btn" class="btn btn-primary">検索</button>
+    </div>
+    <p id="keyword-status" class="form-status" role="status"></p>
+    <ul id="keyword-results" class="keyword-results"></ul>
   </div>
 </dialog>
 
