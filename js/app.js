@@ -50,6 +50,7 @@ const els = {
   fAuthor: $("f-author"),
   fPublisher: $("f-publisher"),
   fPubdate: $("f-pubdate"),
+  fMemo: $("f-memo"),
   fStatus: $("f-status"),
   fDelete: $("f-delete"),
 
@@ -71,6 +72,7 @@ const els = {
   dPublisher: $("d-publisher"),
   dPubdate: $("d-pubdate"),
   dIsbn: $("d-isbn"),
+  dMemo: $("d-memo"),
   dCreatedAt: $("d-createdAt"),
   dDelete: $("d-delete"),
   dEdit: $("d-edit"),
@@ -176,18 +178,19 @@ function render() {
   els.emptyState.hidden = allBooks.length !== 0;
   els.bookGrid.innerHTML = books.map((book) => `
     <li>
-      <button type="button" class="book-card" data-id="${escapeAttr(book.id)}">
+      <button type="button" class="book-list-item" data-id="${escapeAttr(book.id)}">
         <div class="book-cover-wrap">${bookCoverMarkup(book)}</div>
         <div class="book-info">
           <p class="book-title">${escapeHtml(book.title || "（タイトル未設定）")}</p>
           <p class="book-author">${escapeHtml(book.author || "")}</p>
+          ${book.memo ? `<p class="book-memo">📝 ${escapeHtml(book.memo)}</p>` : ""}
         </div>
       </button>
     </li>
   `).join("");
 
-  els.bookGrid.querySelectorAll(".book-card").forEach((card) => {
-    card.addEventListener("click", () => openDetail(card.dataset.id));
+  els.bookGrid.querySelectorAll(".book-list-item").forEach((item) => {
+    item.addEventListener("click", () => openDetail(item.dataset.id));
   });
 }
 
@@ -349,6 +352,7 @@ function openBookForm(prefill) {
     els.fAuthor.value = prefill.author || "";
     els.fPublisher.value = prefill.publisher || "";
     els.fPubdate.value = prefill.pubdate || "";
+    els.fMemo.value = prefill.memo || "";
     const cover = prefill.coverUrl || prefill.coverData || "";
     if (cover) {
       if (cover.startsWith("data:")) { els.fCoverUrl.value = ""; }
@@ -518,6 +522,7 @@ els.bookForm.addEventListener("submit", async (e) => {
     author: els.fAuthor.value.trim(),
     publisher: els.fPublisher.value.trim(),
     pubdate: els.fPubdate.value.trim(),
+    memo: els.fMemo.value.trim(),
     coverUrl: cover,
     createdAt,
   };
@@ -555,6 +560,7 @@ async function openDetail(id) {
   els.dPublisher.textContent = book.publisher || "-";
   els.dPubdate.textContent = book.pubdate || "-";
   els.dIsbn.textContent = book.isbn || "-";
+  els.dMemo.textContent = book.memo || "-";
   els.dCreatedAt.textContent = formatDate(book.createdAt);
   openModal(els.detailModal);
 }
@@ -612,6 +618,7 @@ els.importFile.addEventListener("change", async () => {
         author: String(r.author || "").trim(),
         publisher: String(r.publisher || "").trim(),
         pubdate: String(r.pubdate || "").trim(),
+        memo: String(r.memo || "").trim(),
         coverUrl: String(r.coverUrl || r.coverData || "").trim(),
         createdAt: r.createdAt && !Number.isNaN(new Date(r.createdAt).getTime())
           ? new Date(r.createdAt).toISOString()
