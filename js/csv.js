@@ -1,6 +1,6 @@
 // CSV / JSON でのバックアップ用エクスポート・インポート
 
-const CSV_COLUMNS = ["id", "isbn", "title", "author", "publisher", "pubdate", "coverUrl", "createdAt"];
+const CSV_COLUMNS = ["id", "isbn", "title", "author", "publisher", "pubdate", "memo", "coverUrl", "createdAt"];
 
 function csvEscape(value) {
   const str = value === undefined || value === null ? "" : String(value);
