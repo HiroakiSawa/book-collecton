@@ -43,7 +43,7 @@ ISBN／書名／著者／出版社／出版日／メモ／表紙画像／登録�
 1. [Firebaseコンソール](https://console.firebase.google.com)にGoogleアカウントでログインし、新規プロジェクトを作成します（無料）。
 2. 左メニュー「Firestore Database」→「データベースを作成」。リージョンは `asia-northeast1`（東京）がおすすめです。
 3. 左メニュー「Authentication」→「Sign-in method」タブで「Google」を有効化します。
-4. 同じく「Authentication」→「Settings」タブの「承認済みドメイン」に、このアプリを配信するドメイン（例: GitHub Pagesの `xxxx.github.io`）を追加します。`localhost` は最初から登録されています。
+4. 同じく「Authentication」→「Settings」タブの「承認済みドメイン」を確認します。`localhost` は最初から登録されているため、**各端末でローカルサーバー（`http://localhost:...`）を起動して個人利用するだけであれば、この手順での追加作業は不要**です。GitHub Pagesなど外部に公開する場合のみ、そのドメインを追加してください。
 5. 「プロジェクトの設定」（⚙️アイコン）→「全般」タブの「マイアプリ」からウェブアプリを追加し、表示された `firebaseConfig` の値を `js/cloud.js` 冒頭の `FIREBASE_CONFIG` に貼り付けます。
 6. Firestoreの「ルール」タブに以下を貼り付けて公開し、本人のデータしか読み書きできないようにします。
 
@@ -83,17 +83,20 @@ js/csv.js             CSV/JSON エクスポート・インポート
 js/app.js             画面制御・イベント処理
 ```
 
-## ローカルでの動作確認
+## ローカルでの動作確認（個人利用向け）
 
-ES Modulesを使用しているため、`file://` では動作しません。簡易HTTPサーバーで配信してください。
+ES Modulesを使用しているため、`file://` では動作しません。この`サーバー利用版`フォルダの中に移動してから、簡易HTTPサーバーで配信してください。
 
 ```bash
-npx serve .
+cd サーバー利用版
+python3 -m http.server 8080 --bind 127.0.0.1   # Windowsは python （python3ではない場合あり）
 # または
-python3 -m http.server 8080
+npx serve . -l 8080
 ```
 
 ブラウザで `http://localhost:8080` を開いてください。カメラ機能はHTTPS（またはlocalhost）でのみ動作します。
+
+複数の端末（Mac・Windowsなど）で個人利用する場合は、各端末にこのフォルダをコピーし、`js/cloud.js` の `FIREBASE_CONFIG` に**同じ値**を設定してください。同じFirebaseプロジェクト・同じGoogleアカウントでサインインすれば、各端末のローカルサーバー経由でも蔵書データはリアルタイムに同期されます（`localhost`は承認済みドメインとして最初から使えるため、追加設定は不要です）。
 
 ## 注意事項・制限
 
