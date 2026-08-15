@@ -791,6 +791,5 @@ async function handleAuthChange(user) {
     showToast("この端末ではローカルキャッシュが利用できません。アップロード画像の保存は制限されます。", true);
   }
 
-  await cloud.consumeRedirectResult();
   cloud.onAuthChange(handleAuthChange);
 })();
