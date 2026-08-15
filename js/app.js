@@ -1,14 +1,22 @@
 import * as db from "./db.js";
+import * as cloud from "./cloud.js";
 import { lookupIsbn, normalizeIsbn, searchByKeyword } from "./api.js";
 import { startScanner, stopScanner, isCameraSupported } from "./scanner.js";
 import { toCSV, toJSON, fromCSV, fromJSON, downloadTextFile } from "./csv.js";
 import { initHardwareScanner } from "./hardwareScanner.js";
 
 // ---------- 状態 ----------
+// 蔵書データそのものはFirestore（クラウド）が正とし、allBooksは購読中の内容の写し。
+// db.js（IndexedDB）は、アップロードした表紙画像（data:URL）をこの端末にだけキャッシュする用途と、
+// 導入前にローカルに残っていたデータをクラウドへ移行する用途にのみ使う。
 let allBooks = [];
 let searchTerm = "";
 let sortKey = "createdAt-desc";
 let editingIsbnOriginal = null; // 編集中に登録済みISBNの重複判定を行うための元ISBN
+let currentUser = null;
+let unsubscribeBooks = null;
+let migrationOffered = false;
+const localCoverCache = new Map(); // bookId -> data:URL（この端末にのみキャッシュした表紙画像）
 
 // ---------- 要素取得 ----------
 const $ = (id) => document.getElementById(id);
@@ -16,6 +24,19 @@ const $ = (id) => document.getElementById(id);
 const els = {
   searchInput: $("search-input"),
   sortSelect: $("sort-select"),
+
+  accountEmail: $("account-email"),
+  btnSignIn: $("btn-sign-in"),
+  btnSignInMain: $("btn-sign-in-main"),
+  btnSignOut: $("btn-sign-out"),
+  configNotice: $("config-notice"),
+  signedOutNotice: $("signed-out-notice"),
+  appContent: $("app-content"),
+  migrateBanner: $("migrate-banner"),
+  migrateCount: $("migrate-count"),
+  btnMigrateConfirm: $("btn-migrate-confirm"),
+  btnMigrateDismiss: $("btn-migrate-dismiss"),
+
   btnScanCamera: $("btn-scan-camera"),
   btnScanReader: $("btn-scan-reader"),
   btnManual: $("btn-manual"),
@@ -127,14 +148,21 @@ const SOURCE_LABELS = { openBD: "openBD", GoogleBooks: "Google Books", OpenLibra
 function sourceLabel(source) { return SOURCE_LABELS[source] || source || "不明"; }
 
 // ---------- データ読み込み・描画 ----------
-async function loadBooks() {
+function findByIsbnInState(isbn) {
+  if (!isbn) return null;
+  return allBooks.find((b) => b.isbn && b.isbn === isbn) || null;
+}
+
+// アップロードした表紙画像（data:URL）は端末ローカルのIndexedDBにのみキャッシュしているため、
+// 一覧描画のたびに毎回問い合わせずに済むよう、起動時・更新時にメモリ上へ読み込んでおく。
+async function refreshLocalCoverCache() {
+  localCoverCache.clear();
   try {
-    allBooks = await db.getAllBooks();
-  } catch (err) {
-    allBooks = [];
-    showToast("データの読み込みに失敗しました。この端末では保存機能が利用できない可能性があります。", true);
-  }
-  render();
+    const localBooks = await db.getAllBooks();
+    localBooks.forEach((b) => {
+      if (b.coverUrl && b.coverUrl.startsWith("data:")) localCoverCache.set(b.id, b.coverUrl);
+    });
+  } catch { /* ローカルキャッシュが使えなくても致命的ではない */ }
 }
 
 function getFilteredSortedBooks() {
@@ -158,7 +186,7 @@ function getFilteredSortedBooks() {
 }
 
 function bookCoverMarkup(book) {
-  const src = book.coverUrl || book.coverData;
+  const src = book.coverUrl || localCoverCache.get(book.id) || "";
   if (src) {
     return `<img src="${escapeAttr(src)}" alt="" loading="lazy" onerror="this.parentElement.innerHTML='<div class=&quot;book-cover-placeholder&quot;>📕</div>'">`;
   }
@@ -266,7 +294,8 @@ async function onHardwareScan(rawText) {
 initHardwareScanner(onHardwareScan);
 
 async function handleIsbnCaptured(isbn) {
-  const existing = await db.findByIsbn(isbn);
+  if (!currentUser) { showToast("サインインしてください。", true); return; }
+  const existing = findByIsbnInState(isbn);
   if (existing) {
     showToast(`この ISBN は既に登録されています：「${existing.title}」`, true);
     openDetail(existing.id);
@@ -297,11 +326,12 @@ els.isbnSearchInput.addEventListener("keydown", (e) => {
 });
 
 els.isbnSearchBtn.addEventListener("click", async () => {
+  if (!currentUser) { els.isbnSearchStatus.textContent = "サインインしてください。"; return; }
   const isbn = normalizeIsbn(els.isbnSearchInput.value);
   if (!isbn) { els.isbnSearchStatus.textContent = "ISBNを入力してください。"; return; }
   els.isbnSearchStatus.textContent = "検索中...";
 
-  const existing = await db.findByIsbn(isbn);
+  const existing = findByIsbnInState(isbn);
   if (existing) {
     els.isbnSearchStatus.textContent = "";
     closeModal(els.isbnSearchModal);
@@ -397,11 +427,11 @@ els.fCoverClear.addEventListener("click", () => {
   setCoverPreview("");
 });
 
-async function checkDuplicateIsbn() {
+function checkDuplicateIsbn() {
   const isbn = normalizeIsbn(els.fIsbn.value);
   if (!isbn) { els.fDuplicateWarning.hidden = true; return; }
   if (isbn === editingIsbnOriginal) { els.fDuplicateWarning.hidden = true; return; }
-  const existing = await db.findByIsbn(isbn);
+  const existing = findByIsbnInState(isbn);
   const currentId = els.fId.value;
   els.fDuplicateWarning.hidden = !(existing && existing.id !== currentId);
 }
@@ -502,16 +532,14 @@ function selectKeywordResult(candidate) {
 
 els.bookForm.addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (!currentUser) { els.fStatus.textContent = "サインインしてください。"; return; }
   const title = els.fTitle.value.trim();
   if (!title) { els.fStatus.textContent = "書名は必須です。"; els.fTitle.focus(); return; }
 
   const id = els.fId.value || db.makeId();
   const isExisting = !!els.fId.value;
-  let createdAt = new Date().toISOString();
-  if (isExisting) {
-    const existing = await db.getBook(id);
-    if (existing) createdAt = existing.createdAt;
-  }
+  const existingBook = isExisting ? allBooks.find((b) => b.id === id) : null;
+  const createdAt = existingBook ? existingBook.createdAt : new Date().toISOString();
 
   const cover = els.fCoverPreview.style.display !== "none" ? els.fCoverPreview.src : "";
 
@@ -528,10 +556,17 @@ els.bookForm.addEventListener("submit", async (e) => {
   };
 
   try {
-    await db.saveBook(book);
+    await cloud.saveBook(currentUser.uid, book);
+    if (cover && cover.startsWith("data:")) {
+      // アップロード画像はクラウドには送らず、この端末のローカルキャッシュにのみ保存する
+      await db.saveBook(book).catch(() => {});
+      localCoverCache.set(id, cover);
+    } else {
+      await db.deleteBook(id).catch(() => {});
+      localCoverCache.delete(id);
+    }
     showToast(isExisting ? "更新しました。" : "登録しました。");
     closeModal(els.bookModal);
-    await loadBooks();
   } catch (err) {
     els.fStatus.textContent = "保存に失敗しました：" + (err && err.message ? err.message : err);
   }
@@ -539,20 +574,21 @@ els.bookForm.addEventListener("submit", async (e) => {
 
 els.fDelete.addEventListener("click", async () => {
   const id = els.fId.value;
-  if (!id) return;
+  if (!id || !currentUser) return;
   if (!confirm("この本を削除しますか？")) return;
-  await db.deleteBook(id);
+  await cloud.deleteBook(currentUser.uid, id);
+  await db.deleteBook(id).catch(() => {});
+  localCoverCache.delete(id);
   closeModal(els.bookModal);
   showToast("削除しました。");
-  await loadBooks();
 });
 
 // ---------- 詳細表示 ----------
-async function openDetail(id) {
-  const book = await db.getBook(id);
+function openDetail(id) {
+  const book = allBooks.find((b) => b.id === id);
   if (!book) { showToast("本が見つかりませんでした。", true); return; }
   currentDetailId = id;
-  const cover = book.coverUrl || book.coverData;
+  const cover = book.coverUrl || localCoverCache.get(id) || "";
   if (cover) { els.dCover.src = cover; els.dCover.style.display = "block"; }
   else { els.dCover.removeAttribute("src"); els.dCover.style.display = "none"; }
   els.dTitle.textContent = book.title || "（タイトル未設定）";
@@ -565,30 +601,34 @@ async function openDetail(id) {
   openModal(els.detailModal);
 }
 
-els.dEdit.addEventListener("click", async () => {
-  const book = await db.getBook(currentDetailId);
+els.dEdit.addEventListener("click", () => {
+  const book = allBooks.find((b) => b.id === currentDetailId);
   closeModal(els.detailModal);
-  openBookForm(book);
+  if (!book) return;
+  openBookForm({ ...book, coverUrl: book.coverUrl || localCoverCache.get(book.id) || "" });
 });
 
 els.dDelete.addEventListener("click", async () => {
-  if (!currentDetailId) return;
+  if (!currentDetailId || !currentUser) return;
   if (!confirm("この本を削除しますか？")) return;
-  await db.deleteBook(currentDetailId);
+  await cloud.deleteBook(currentUser.uid, currentDetailId);
+  await db.deleteBook(currentDetailId).catch(() => {});
+  localCoverCache.delete(currentDetailId);
   closeModal(els.detailModal);
   showToast("削除しました。");
-  await loadBooks();
 });
 
 // ---------- エクスポート / インポート ----------
 els.btnExport.addEventListener("click", () => {
   if (allBooks.length === 0) { showToast("エクスポートする本がありません。", true); return; }
+  // この端末にのみキャッシュされているアップロード画像も、バックアップには含めて出力する
+  const enriched = allBooks.map((b) => (b.coverUrl ? b : { ...b, coverUrl: localCoverCache.get(b.id) || "" }));
   const format = els.exportFormat.value;
   const stamp = new Date().toISOString().slice(0, 10);
   if (format === "csv") {
-    downloadTextFile(`books-${stamp}.csv`, toCSV(allBooks), "text/csv;charset=utf-8");
+    downloadTextFile(`books-${stamp}.csv`, toCSV(enriched), "text/csv;charset=utf-8");
   } else {
-    downloadTextFile(`books-${stamp}.json`, toJSON(allBooks), "application/json;charset=utf-8");
+    downloadTextFile(`books-${stamp}.json`, toJSON(enriched), "application/json;charset=utf-8");
   }
   showToast("エクスポートしました。");
 });
@@ -599,6 +639,7 @@ els.importFile.addEventListener("change", async () => {
   const file = els.importFile.files[0];
   els.importFile.value = "";
   if (!file) return;
+  if (!currentUser) { showToast("サインインしてください。", true); return; }
 
   try {
     const text = await file.text();
@@ -627,19 +668,129 @@ els.importFile.addEventListener("change", async () => {
 
     if (normalized.length === 0) { showToast("インポートできるデータがありませんでした。", true); return; }
 
-    await db.bulkPut(normalized);
-    await loadBooks();
+    await cloud.bulkSaveBooks(currentUser.uid, normalized);
+    // アップロード画像(data:URL)が含まれる行は、この端末のローカルキャッシュにも保存する
+    const withLocalImages = normalized.filter((b) => b.coverUrl && b.coverUrl.startsWith("data:"));
+    if (withLocalImages.length) {
+      await db.bulkPut(withLocalImages).catch(() => {});
+      withLocalImages.forEach((b) => localCoverCache.set(b.id, b.coverUrl));
+    }
     showToast(`${normalized.length} 件インポートしました。`);
   } catch (err) {
     showToast("インポートに失敗しました：" + (err && err.message ? err.message : err), true);
   }
 });
 
+// ---------- アカウント / サインイン ----------
+els.btnSignIn.addEventListener("click", () => {
+  cloud.signIn().catch((err) => showToast("サインインに失敗しました：" + err.message, true));
+});
+els.btnSignInMain.addEventListener("click", () => {
+  cloud.signIn().catch((err) => showToast("サインインに失敗しました：" + err.message, true));
+});
+els.btnSignOut.addEventListener("click", () => {
+  cloud.signOutUser().catch((err) => showToast("サインアウトに失敗しました：" + err.message, true));
+});
+
+function setSignedInUI(user) {
+  if (user) {
+    els.signedOutNotice.hidden = true;
+    els.appContent.hidden = false;
+    els.accountEmail.hidden = false;
+    els.accountEmail.textContent = user.email || user.displayName || "サインイン済み";
+    els.btnSignIn.hidden = true;
+    els.btnSignOut.hidden = false;
+  } else {
+    els.signedOutNotice.hidden = false;
+    els.appContent.hidden = true;
+    els.migrateBanner.hidden = true;
+    els.accountEmail.hidden = true;
+    els.btnSignIn.hidden = false;
+    els.btnSignOut.hidden = true;
+  }
+}
+
+// クラウドにまだ何も登録されていない状態で、この端末にIndexedDBの旧データが残っている場合、
+// 一度だけクラウドへのアップロードを提案する（サインインごとに1回、既に断った場合は再度出さない）。
+async function maybeOfferMigration(uid, cloudBookCount) {
+  if (migrationOffered || cloudBookCount > 0) return;
+  migrationOffered = true;
+  const dismissKey = `book-collection:migration-dismissed:${uid}`;
+  if (localStorage.getItem(dismissKey)) return;
+
+  let localBooks = [];
+  try {
+    localBooks = await db.getAllBooks();
+  } catch { return; }
+  if (localBooks.length === 0) return;
+
+  els.migrateCount.textContent = String(localBooks.length);
+  els.migrateBanner.hidden = false;
+
+  els.btnMigrateConfirm.onclick = async () => {
+    els.btnMigrateConfirm.disabled = true;
+    try {
+      await cloud.bulkSaveBooks(uid, localBooks);
+      showToast(`${localBooks.length} 件をクラウドにアップロードしました。`);
+      els.migrateBanner.hidden = true;
+    } catch (err) {
+      showToast("アップロードに失敗しました：" + (err && err.message ? err.message : err), true);
+      els.btnMigrateConfirm.disabled = false;
+    }
+  };
+  els.btnMigrateDismiss.onclick = () => {
+    localStorage.setItem(dismissKey, "1");
+    els.migrateBanner.hidden = true;
+  };
+}
+
+let authGeneration = 0;
+
+async function handleAuthChange(user) {
+  const generation = ++authGeneration; // 購読処理の完了前に状態が変わった場合に古い購読を破棄するための世代カウンタ
+  currentUser = user;
+  setSignedInUI(user);
+
+  if (unsubscribeBooks) { unsubscribeBooks(); unsubscribeBooks = null; }
+
+  if (!user) {
+    allBooks = [];
+    render();
+    migrationOffered = false;
+    return;
+  }
+
+  await refreshLocalCoverCache();
+  const unsubscribe = await cloud.subscribeToBooks(
+    user.uid,
+    (books) => {
+      allBooks = books;
+      render();
+      maybeOfferMigration(user.uid, books.length);
+    },
+    (err) => showToast("クラウドとの同期に失敗しました：" + err.message, true)
+  );
+  if (generation !== authGeneration) {
+    // 待機中に別の認証状態変化が発生していたので、この購読はもう不要
+    unsubscribe();
+    return;
+  }
+  unsubscribeBooks = unsubscribe;
+}
+
 // ---------- 初期化 ----------
 (async function init() {
-  const ok = await db.isStorageAvailable();
-  if (!ok) {
-    showToast("この端末では保存機能が利用できません。手入力で内容を確認することはできますが、保存されません。", true);
+  if (!cloud.isConfigured()) {
+    els.configNotice.hidden = false;
+    els.signedOutNotice.hidden = true;
+    return;
   }
-  await loadBooks();
+
+  const storageOk = await db.isStorageAvailable();
+  if (!storageOk) {
+    showToast("この端末ではローカルキャッシュが利用できません。アップロード画像の保存は制限されます。", true);
+  }
+
+  await cloud.consumeRedirectResult();
+  cloud.onAuthChange(handleAuthChange);
 })();
