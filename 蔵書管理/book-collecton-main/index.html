@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>蔵書管理</title>
+<meta name="description" content="ISBNバーコードをスキャンして蔵書を登録・管理するアプリ（端末内保存）">
+<meta name="theme-color" content="#2f6f4f">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📚</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="app-header">
+  <h1>📚 蔵書管理</h1>
+  <div class="search-bar">
+    <input type="search" id="search-input" placeholder="書名・著者で検索" aria-label="検索">
+    <select id="sort-select" aria-label="並び替え">
+      <option value="createdAt-desc">登録日が新しい順</option>
+      <option value="createdAt-asc">登録日が古い順</option>
+      <option value="title-asc">書名順</option>
+      <option value="author-asc">著者順</option>
+    </select>
+  </div>
+</header>
+
+<main>
+  <div class="action-bar">
+    <button id="btn-scan-camera" class="btn btn-primary">📷 カメラで読み取る</button>
+    <button id="btn-scan-reader" class="btn btn-primary">🔌 バーコードリーダーで読み取る</button>
+    <button id="btn-manual" class="btn">✏️ 手入力で登録</button>
+    <button id="btn-isbn-search" class="btn">🔎 ISBNで検索</button>
+    <div class="spacer"></div>
+    <select id="export-format" aria-label="エクスポート形式">
+      <option value="json">JSON形式</option>
+      <option value="csv">CSV形式</option>
+    </select>
+    <button id="btn-export" class="btn btn-ghost">⬇️ エクスポート</button>
+    <button id="btn-import" class="btn btn-ghost">⬆️ インポート</button>
+    <input type="file" id="import-file" accept=".json,.csv" hidden>
+  </div>
+
+  <p class="hint-text">💡 USB/Bluetoothのバーコードリーダーは「🔌 バーコードリーダーで読み取る」からだけでなく、入力欄を編集中でなければ画面のどこからでもそのまま読み取らせて自動登録できます。</p>
+  <p id="book-count" class="book-count"></p>
+  <div id="empty-state" class="empty-state" hidden>
+    <p>まだ本が登録されていません。</p>
+    <p>「カメラで読み取る」「バーコードリーダーで読み取る」または「手入力で登録」から始めましょう。</p>
+  </div>
+  <ul id="book-grid" class="book-grid" aria-live="polite"></ul>
+</main>
+
+<!-- スキャンモーダル -->
+<dialog id="scan-modal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 id="scan-modal-title">バーコードをスキャン</h2>
+      <button class="btn-close" data-close="scan-modal" aria-label="閉じる">✕</button>
+    </div>
+    <div id="scan-reader"></div>
+    <p id="scan-status" class="scan-status">本の裏表紙のISBNバーコードをカメラに向けてください。</p>
+    <p id="scan-unsupported" class="scan-status warn" hidden>このブラウザ・環境ではカメラを利用できません。「手入力で登録」をご利用ください。</p>
+  </div>
+</dialog>
+
+<!-- 書籍フォームモーダル(登録・編集共通) -->
+<dialog id="book-modal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 id="book-modal-title">本を登録</h2>
+      <button class="btn-close" data-close="book-modal" aria-label="閉じる">✕</button>
+    </div>
+    <form id="book-form">
+      <input type="hidden" id="f-id">
+      <div class="form-cover">
+        <img id="f-cover-preview" class="cover-preview" alt="表紙プレビュー" style="display:none">
+        <div class="cover-controls">
+          <label class="btn btn-small" for="f-cover-file">画像を選択</label>
+          <input type="file" id="f-cover-file" accept="image/*" hidden>
+          <button type="button" id="f-cover-clear" class="btn btn-small btn-ghost">画像を削除</button>
+        </div>
+        <label class="field-label" for="f-cover-url">表紙画像URL（任意）</label>
+        <input type="url" id="f-cover-url" placeholder="https://...">
+      </div>
+
+      <label class="field-label" for="f-isbn">ISBN（任意）</label>
+      <div class="isbn-row">
+        <input type="text" id="f-isbn" inputmode="numeric" placeholder="978XXXXXXXXXX">
+        <button type="button" id="f-isbn-lookup" class="btn btn-small">この ISBN で検索</button>
+      </div>
+      <p id="f-duplicate-warning" class="duplicate-warning" hidden>⚠️ この ISBN は既に登録されています。</p>
+
+      <button type="button" id="f-keyword-search" class="btn btn-small">🔎 書名・著者で候補を探す（洋書・ISBN不明な本にも）</button>
+
+      <label class="field-label" for="f-title">書名 <span class="required">必須</span></label>
+      <input type="text" id="f-title" required>
+
+      <label class="field-label" for="f-author">著者</label>
+      <input type="text" id="f-author">
+
+      <label class="field-label" for="f-publisher">出版社</label>
+      <input type="text" id="f-publisher">
+
+      <label class="field-label" for="f-pubdate">出版日</label>
+      <input type="text" id="f-pubdate" placeholder="例: 2020-01-15 または 2020">
+
+      <label class="field-label" for="f-memo">メモ</label>
+      <textarea id="f-memo" rows="3" placeholder="任意のメモ（保管場所・貸出状況・感想など）"></textarea>
+
+      <p id="f-status" class="form-status" role="status"></p>
+
+      <div class="form-actions">
+        <button type="button" id="f-delete" class="btn btn-danger" hidden>削除</button>
+        <div class="spacer"></div>
+        <button type="button" class="btn" data-close="book-modal">キャンセル</button>
+        <button type="submit" class="btn btn-primary">保存</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<!-- ISBN検索モーダル -->
+<dialog id="isbn-search-modal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>ISBNで書誌情報を検索</h2>
+      <button class="btn-close" data-close="isbn-search-modal" aria-label="閉じる">✕</button>
+    </div>
+    <div class="isbn-row">
+      <input type="text" id="isbn-search-input" inputmode="numeric" placeholder="ISBNを入力">
+      <button type="button" id="isbn-search-btn" class="btn btn-primary">検索</button>
+    </div>
+    <p id="isbn-search-status" class="form-status" role="status"></p>
+  </div>
+</dialog>
+
+<!-- 書名・著者キーワード検索モーダル（ISBNで見つからない洋書などの代替手段） -->
+<dialog id="keyword-modal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>書名・著者で候補を探す</h2>
+      <button class="btn-close" data-close="keyword-modal" aria-label="閉じる">✕</button>
+    </div>
+    <div class="isbn-row">
+      <input type="text" id="keyword-input" placeholder="書名・著者などのキーワード">
+      <button type="button" id="keyword-search-btn" class="btn btn-primary">検索</button>
+    </div>
+    <p id="keyword-status" class="form-status" role="status"></p>
+    <ul id="keyword-results" class="keyword-results"></ul>
+  </div>
+</dialog>
+
+<!-- 詳細モーダル -->
+<dialog id="detail-modal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>本の詳細</h2>
+      <button class="btn-close" data-close="detail-modal" aria-label="閉じる">✕</button>
+    </div>
+    <div class="detail-body">
+      <img id="d-cover" class="detail-cover" alt="表紙">
+      <dl class="detail-list">
+        <dt>書名</dt><dd id="d-title"></dd>
+        <dt>著者</dt><dd id="d-author"></dd>
+        <dt>出版社</dt><dd id="d-publisher"></dd>
+        <dt>出版日</dt><dd id="d-pubdate"></dd>
+        <dt>ISBN</dt><dd id="d-isbn"></dd>
+        <dt>メモ</dt><dd id="d-memo" class="detail-memo"></dd>
+        <dt>登録日</dt><dd id="d-createdAt"></dd>
+      </dl>
+    </div>
+    <div class="form-actions">
+      <button type="button" id="d-delete" class="btn btn-danger">削除</button>
+      <div class="spacer"></div>
+      <button type="button" id="d-edit" class="btn btn-primary">編集</button>
+    </div>
+  </div>
+</dialog>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
