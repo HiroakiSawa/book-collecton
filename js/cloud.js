@@ -82,10 +82,16 @@ function ensureInitialized() {
   return initPromise;
 }
 
-/** Googleアカウントでのサインインを開始する（リダイレクト方式。結果は consumeRedirectResult() で受け取る） */
+/**
+ * Googleアカウントでのサインインを開始する（ポップアップ方式）。
+ * 以前はリダイレクト方式（ページ全体を遷移させる方式）だったが、Chromeの
+ * サードパーティ状態パーティショニング（中間ドメインの状態を積極的に破棄する挙動）により、
+ * Firebase/Google間を跨ぐ複数ドメインのリダイレクトチェーンで認証結果を正しく
+ * 持ち帰れないことがあったため、別ウィンドウで完結するポップアップ方式に変更した。
+ */
 export async function signIn() {
   await ensureInitialized();
-  return sdk.signInWithRedirect(auth, provider);
+  return sdk.signInWithPopup(auth, provider);
 }
 
 export async function signOutUser() {
@@ -106,16 +112,6 @@ export async function onAuthChange(callback) {
     return () => {};
   }
   return sdk.onAuthStateChanged(auth, callback);
-}
-
-/** リダイレクトでのサインイン完了後、結果を確定させる（ページ読み込み時に一度呼ぶ） */
-export async function consumeRedirectResult() {
-  try {
-    await ensureInitialized();
-    await sdk.getRedirectResult(auth);
-  } catch (err) {
-    console.error("サインインの確認に失敗しました", err);
-  }
 }
 
 function booksCollection(uid) {
