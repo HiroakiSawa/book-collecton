@@ -1,4 +1,7 @@
-// IndexedDB を使った蔵書データの永続化（端末内のみ・サーバー同期なし）
+// IndexedDB を使った端末ローカルの補助ストレージ。
+// 蔵書データそのものはFirebase Firestore（js/cloud.js）が正で複数端末に同期されるが、
+// ここは (1) アップロードした表紙画像(data:URL)をこの端末にだけキャッシュする、
+// (2) Firebase導入前に残っていたデータをクラウドへ移行する、という2つの用途にのみ使う。
 const DB_NAME = "book-collection-db";
 const DB_VERSION = 1;
 const STORE = "books";

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>蔵書管理</title>
-<meta name="description" content="ISBNバーコードをスキャンして蔵書を登録・管理するアプリ（端末内保存）">
+<meta name="description" content="ISBNバーコードをスキャンして蔵書を登録・管理するアプリ（Firebaseで複数端末同期）">
 <meta name="theme-color" content="#2f6f4f">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📚</text></svg>">
 <link rel="stylesheet" href="css/style.css">
@@ -21,31 +21,56 @@
       <option value="author-asc">著者順</option>
     </select>
   </div>
+  <div class="account-area">
+    <span id="account-email" class="account-email" hidden></span>
+    <button id="btn-sign-in" class="btn btn-primary btn-small" hidden>🔐 サインイン</button>
+    <button id="btn-sign-out" class="btn btn-small btn-ghost" hidden>サインアウト</button>
+  </div>
 </header>
 
 <main>
-  <div class="action-bar">
-    <button id="btn-scan-camera" class="btn btn-primary">📷 カメラで読み取る</button>
-    <button id="btn-scan-reader" class="btn btn-primary">🔌 バーコードリーダーで読み取る</button>
-    <button id="btn-manual" class="btn">✏️ 手入力で登録</button>
-    <button id="btn-isbn-search" class="btn">🔎 ISBNで検索</button>
-    <div class="spacer"></div>
-    <select id="export-format" aria-label="エクスポート形式">
-      <option value="json">JSON形式</option>
-      <option value="csv">CSV形式</option>
-    </select>
-    <button id="btn-export" class="btn btn-ghost">⬇️ エクスポート</button>
-    <button id="btn-import" class="btn btn-ghost">⬆️ インポート</button>
-    <input type="file" id="import-file" accept=".json,.csv" hidden>
+  <div id="config-notice" class="notice-banner warn" hidden>
+    ⚠️ Firebaseの設定が完了していません。<code>js/cloud.js</code> の <code>FIREBASE_CONFIG</code> に、Firebaseコンソールで取得した値を設定してください。
   </div>
 
-  <p class="hint-text">💡 USB/Bluetoothのバーコードリーダーは「🔌 バーコードリーダーで読み取る」からだけでなく、入力欄を編集中でなければ画面のどこからでもそのまま読み取らせて自動登録できます。</p>
-  <p id="book-count" class="book-count"></p>
-  <div id="empty-state" class="empty-state" hidden>
-    <p>まだ本が登録されていません。</p>
-    <p>「カメラで読み取る」「バーコードリーダーで読み取る」または「手入力で登録」から始めましょう。</p>
+  <div id="signed-out-notice" class="empty-state" hidden>
+    <p>複数端末で蔵書データを同期するには、Googleアカウントでサインインしてください。</p>
+    <button id="btn-sign-in-main" class="btn btn-primary">🔐 Googleでサインイン</button>
   </div>
-  <ul id="book-grid" class="book-grid" aria-live="polite"></ul>
+
+  <div id="migrate-banner" class="notice-banner" hidden>
+    <p>この端末に <strong id="migrate-count">0</strong> 件のローカルデータが見つかりました。クラウドにアップロードして他の端末とも同期しますか？</p>
+    <div class="form-actions">
+      <button type="button" id="btn-migrate-dismiss" class="btn btn-ghost">後で</button>
+      <button type="button" id="btn-migrate-confirm" class="btn btn-primary">アップロードする</button>
+    </div>
+  </div>
+
+  <div id="app-content" hidden>
+    <div class="action-bar">
+      <button id="btn-scan-camera" class="btn btn-primary">📷 カメラで読み取る</button>
+      <button id="btn-scan-reader" class="btn btn-primary">🔌 バーコードリーダーで読み取る</button>
+      <button id="btn-manual" class="btn">✏️ 手入力で登録</button>
+      <button id="btn-isbn-search" class="btn">🔎 ISBNで検索</button>
+      <div class="spacer"></div>
+      <select id="export-format" aria-label="エクスポート形式">
+        <option value="json">JSON形式</option>
+        <option value="csv">CSV形式</option>
+      </select>
+      <button id="btn-export" class="btn btn-ghost">⬇️ エクスポート</button>
+      <button id="btn-import" class="btn btn-ghost">⬆️ インポート</button>
+      <input type="file" id="import-file" accept=".json,.csv" hidden>
+    </div>
+
+    <p class="hint-text">💡 USB/Bluetoothのバーコードリーダーは「🔌 バーコードリーダーで読み取る」からだけでなく、入力欄を編集中でなければ画面のどこからでもそのまま読み取らせて自動登録できます。</p>
+    <p class="hint-text">☁️ 登録した内容はGoogleアカウントに紐づけてクラウドに保存され、サインインした他の端末にも自動的に反映されます。</p>
+    <p id="book-count" class="book-count"></p>
+    <div id="empty-state" class="empty-state" hidden>
+      <p>まだ本が登録されていません。</p>
+      <p>「カメラで読み取る」「バーコードリーダーで読み取る」または「手入力で登録」から始めましょう。</p>
+    </div>
+    <ul id="book-grid" class="book-grid" aria-live="polite"></ul>
+  </div>
 </main>
 
 <!-- スキャンモーダル -->
