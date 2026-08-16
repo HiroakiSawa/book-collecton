@@ -27,13 +27,13 @@ const SDK_VERSION = "10.14.1";
 
 // ▼▼▼ ここを Firebase コンソールで取得した実際の値に置き換えてください ▼▼▼
 const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyC4tVe34LVdv_HnpRqTpBgV9kyXJo0Nv1c",
-  authDomain: "book-collection-90851.firebaseapp.com",
-  projectId: "book-collection-90851",
-  storageBucket: "book-collection-90851.firebasestorage.app",
-  messagingSenderId: "227147905943",
-  appId: "1:227147905943:web:c2ea3dca9c74d617ec62d2",
-  measurementId: "G-10TQDS1FYR"
+  apiKey: "Replace_To_Yours",
+  authDomain: "Replace_To_Yours",
+  projectId: "Replace_To_Yours",
+  storageBucket: "Replace_To_Yours",
+  messagingSenderId: "Replace_To_Yours",
+  appId: "Replace_To_Yours",
+  measurementId: "Replace_To_Yours"
 };
 // ▲▲▲ ここまで ▲▲▲
 
